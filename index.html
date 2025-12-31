@@ -28,9 +28,10 @@
                           style="width: 100%; padding: 10px; border-radius: 8px; border: none; background: #1e293b; color: white; font-family: sans-serif;"></textarea>
             </div>
 
-            <button onclick="saveConfig()" style="background: #2563eb; margin-top: 10px;">🚀 Launch Interview</button>
+            <button id="save-btn" style="background: #2563eb; margin-top: 10px;">🚀 Launch Interview</button>
         </div>
     </div>
+
     <h1 class="header-title">🚀 InterviewFlow <span class="badge">AI Powered</span></h1>
 
     <div class="dashboard">
@@ -57,7 +58,7 @@
                 </div>
             </div>
 
-        <div class="card transcript-card">
+            <div class="card transcript-card">
                 <h2>🎤 Live Transcript</h2>
                 <div id="transcript-box" style="height: 100px; overflow-y: auto; color: #ccc; font-style: italic; font-size: 14px;">
                     (Waiting for you to speak...)
@@ -66,8 +67,8 @@
 
             <div class="card control-card">
                 <h2>🎮 Controls</h2>
-                <button onclick="startInterview()" class="btn-start">Start Interview</button>
-                <button onclick="stopInterview()" class="btn-stop">Stop</button>
+                <button id="start-btn" class="btn-start">Start Interview</button>
+                <button id="stop-btn" class="btn-stop">Stop</button>
             </div>
             
             <div class="card logs-card">
@@ -76,6 +77,7 @@
             </div>
         </div>
     </div>
+
     <script src="config.js"></script> 
     <script src="app.js"></script>
 </body>
