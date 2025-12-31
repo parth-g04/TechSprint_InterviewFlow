@@ -37,6 +37,11 @@ let fluencyScore = 0;
 let confidenceScore = 100;
 let lastNervous = 0;
 let frozenNervous = 0;
+let history = [];
+let visualScores = [];
+let frozenEye = 100;
+let frozenFillers = 0;
+
 
 
 
@@ -148,6 +153,16 @@ async function callGemini(userAnswer) {
         console.error("NETWORK ERROR:", error);
         alert(`Network Error: ${error.message}`);
     }
+    visualScores.push(100 - frozenNervous);
+    const confidenceCalc = Math.max(0, 100 - frozenNervous - (evalData.fillerCount * 5));
+
+    history.push({
+        content: contentScore,
+        fluency: fluencyScore,
+        confidence: confidenceCalc,
+        visual: frozenEye
+    });
+
 }
 
 
@@ -176,6 +191,8 @@ recognition.onresult = (event) => {
         silenceTimer = setTimeout(() => {
             if (isInterviewActive) {
                 frozenNervous = lastNervous;   // capture nervousness at answer time
+                frozenEye = Math.round((goodFrames / Math.max(1, totalFrames)) * 100);
+
                 callGemini(finalTranscript);
                 if (frozenNervous > 60) {
                     setTimeout(() => {
@@ -186,6 +203,29 @@ recognition.onresult = (event) => {
         }, 2500);
     }
 };
+
+function computeHireability(){
+  if(history.length === 0) return 0;
+
+  let sum = {content:0, fluency:0, confidence:0, visual:0};
+
+  history.forEach(h=>{
+    sum.content += h.content;
+    sum.fluency += h.fluency;
+    sum.confidence += h.confidence;
+    sum.visual += h.visual;
+  });
+
+  const n = history.length;
+
+  return Math.round(
+    0.4*(sum.content/n) +
+    0.3*(sum.confidence/n) +
+    0.2*(sum.fluency/n) +
+    0.1*(sum.visual/n)
+  );
+}
+
 
 
 function speakText(text) {
@@ -315,12 +355,23 @@ function startInterview(){
 }
 
 
-function stopInterview() {
-    isInterviewActive = false;
-    recognition.stop();
-    window.speechSynthesis.cancel(); // Stop talking
-    alert(`Interview Over!\nEye Contact Score: ${scoreText.innerText}`);
+function stopInterview(){
+  isInterviewActive = false;
+  recognition.stop();
+  window.speechSynthesis.cancel();
+
+  const hireability = computeHireability();
+
+  alert(
+    `Interview Complete\n\n` +
+    `Hireability Score: ${hireability}\n\n` +
+    `Content: ${Math.round(history.reduce((s,h)=>s+h.content,0)/history.length)}\n` +
+    `Confidence: ${Math.round(history.reduce((s,h)=>s+h.confidence,0)/history.length)}\n` +
+    `Fluency: ${Math.round(history.reduce((s,h)=>s+h.fluency,0)/history.length)}\n` +
+    `Visual: ${Math.round(history.reduce((s,h)=>s+h.visual,0)/history.length)}`
+  );
 }
+
 function saveConfig() {
     const role = document.getElementById('role-input').value;
     const resume = document.getElementById('resume-input').value;
