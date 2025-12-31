@@ -41,6 +41,10 @@ let history = [];
 let visualScores = [];
 let frozenEye = 100;
 let frozenFillers = 0;
+let verificationFlags = [];
+const fillerWords = ["um","uh","uhh","umm","hmm","like","basically","actually","i think","maybe","probably"];
+const powerWords  = ["built","led","designed","implemented","optimized","debugged","solved","architected"];
+
 
 
 
@@ -73,23 +77,25 @@ async function callGemini(userAnswer) {
     }
 
     const dynamicPrompt = `
-                You are an expert technical interviewer and evaluator.
+            You are an expert technical interviewer and evaluator.
 
-                Evaluate the candidate answer strictly and return ONLY valid JSON in this format:
+            Evaluate the candidate answer strictly and return ONLY valid JSON in this format:
 
-                {
-                "rating":"Weak/Average/Strong/Exceptional",
-                "grammarErrors": number,
-                "fillerCount": number,
-                "star": { "situation":true/false,"task":true/false,"action":true/false,"result":true/false },
-                "improvementTip":"short tip",
-                "followup":"next interview question"
-                }
+            {
+             "rating":"Weak/Average/Strong/Exceptional",
+             "grammarErrors": number,
+             "fillerCount": number,
+             "star": { "situation":true/false,"task":true/false,"action":true/false,"result":true/false },
+             "verification":"OK/Gap",
+             "verificationNote":"short reason",
+             "improvementTip":"short tip",
+             "followup":"next interview question"
+}
 
-                Role: ${targetRole}
-                Resume: ${userContext}
-                Answer: "${userAnswer}"
-                `;
+Role: ${targetRole}
+Resume: ${userContext}
+Answer: "${userAnswer}"
+`;
 
 
     const requestBody = {
@@ -138,6 +144,11 @@ async function callGemini(userAnswer) {
 <br><b style="color:#22c55e">Rating:</b> ${evalData.rating}
 <br><b>Tip:</b> ${evalData.improvementTip}
 <br><b style="color:#3b82f6">AI:</b> ${evalData.followup}<br>`;
+        if (evalData.verification === "Gap") {
+            verificationFlags.push(evalData.verificationNote);
+            transcriptBox.innerHTML += `<br><span style="color:#f97316">⚠ Verification Gap: ${evalData.verificationNote}</span><br>`;
+        }
+
         if (frozenNervous > 70) {
             evalData.followup = "Let's go slowly. " + evalData.followup;
         }
@@ -156,14 +167,17 @@ async function callGemini(userAnswer) {
     visualScores.push(100 - frozenNervous);
     const confidenceCalc = Math.max(0, 100 - frozenNervous - (evalData.fillerCount * 5));
 
+    let penalty = (evalData.verification === "Gap") ? 10 : 0;
+
     history.push({
         content: contentScore,
         fluency: fluencyScore,
-        confidence: confidenceCalc,
+        confidence: Math.max(0, confidenceCalc - penalty),
         visual: frozenEye
     });
 
 }
+
 
 
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -185,7 +199,8 @@ recognition.onresult = (event) => {
     }
 
     if (finalTranscript !== "") {
-        transcriptBox.innerHTML += `<br><b>You:</b> ${finalTranscript}`;
+        transcriptBox.innerHTML += `<br><b>You:</b> ${heatmap(finalTranscript)}`;
+
 
         // 2. Start Timer: If silence for 2.5 seconds, send to AI
         silenceTimer = setTimeout(() => {
@@ -225,20 +240,23 @@ function computeHireability(){
     0.1*(sum.visual/n)
   );
 }
-
-
-
-function speakText(text) {
-    // Pause recognition so AI doesn't hear itself
-    recognition.stop();
-
-    const speech = new SpeechSynthesisUtterance(text);
-    speech.onend = function () {
-        // Start listening again after AI finishes talking
-        if (isInterviewActive) recognition.start();
-    }
-    window.speechSynthesis.speak(speech);
+function safeAvg(arr, key){
+  const v = arr.map(x=>x[key]).filter(x=>typeof x==="number");
+  return v.length ? Math.round(v.reduce((a,b)=>a+b,0)/v.length) : 0;
 }
+
+
+function speakText(text){
+  recognition.abort(); // HARD stop, no freeze
+
+  const speech = new SpeechSynthesisUtterance(text);
+  speech.onend = ()=>{
+    if(isInterviewActive) recognition.start();
+  };
+  window.speechSynthesis.cancel(); // flush queue
+  window.speechSynthesis.speak(speech);
+}
+
 
 
 function onResults(results) {
@@ -254,14 +272,13 @@ function onResults(results) {
         let status = "Stable";
         let isGood = true;
 
-        if (nose.x < 0.4) { status = "Looking Left"; isGood = false; }
-        if (nose.x > 0.6) { status = "Looking Right"; isGood = false; }
+        if (nose.x < 0.4) { status = "Looking Right"; isGood = false; }
+        if (nose.x > 0.6) { status = "Looking left"; isGood = false; }
         if (nose.y < 0.4) { status = "Looking Up"; isGood = false; }
         if (nose.y > 0.7) { status = "Looking Down"; isGood = false; }
 
         statusText.innerText = status;
         let deviation = Math.abs(nose.x - 0.5) * 100;
-
 
         if (baselineActive) {
             baselineFrames++;
@@ -311,15 +328,33 @@ const faceMesh = new FaceMesh({ locateFile: (file) => `https://cdn.jsdelivr.net/
 faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
 faceMesh.onResults(onResults);
 
+let isProcessing = false;
 let lastSend = 0;
 
 const camera = new Camera(videoElement, {
-    onFrame: async () => {
-        if (Date.now() - lastSend < 100) return;   // 10 FPS cap
-        lastSend = Date.now();
-        await faceMesh.send({ image: videoElement });
-    },
-    width: 640, height: 480
+  onFrame: async () => {
+    // CHECK 1: If we are already busy processing a frame, SKIP this frame entirely
+    if (isProcessing) return;
+
+    // CHECK 2: Throttle to ~10 FPS (100ms) to save CPU
+    if (Date.now() - lastSend < 100) return;
+
+    // LOCK: Set the flag to true so no other frames enter
+    isProcessing = true; 
+    lastSend = Date.now();
+
+    try {
+      // Send to FaceMesh and WAIT for it to finish
+      await faceMesh.send({ image: videoElement });
+    } catch (error) {
+      console.error("FaceMesh Error:", error);
+    } finally {
+      // UNLOCK: Only now do we allow the next frame in
+      isProcessing = false; 
+    }
+  },
+  width: 640,
+  height: 480
 });
 camera.start();
 
@@ -346,30 +381,60 @@ function startInterview(){
   baselineDeviation = 0;
   isInterviewActive = true;
 
-  speakText("Calibration started. Please look naturally at the screen.");
+  // Let camera stabilize first
+  setTimeout(()=>{
+    speakText("Calibration started. Please look naturally at the screen.");
+  }, 400);
 
   setTimeout(()=>{
     baselineActive = false;
     speakText("Calibration complete. Tell me about yourself.");
-  }, 8000);
+  }, 8500);
 }
 
 
-function stopInterview(){
-  isInterviewActive = false;
-  recognition.stop();
-  window.speechSynthesis.cancel();
 
-  const hireability = computeHireability();
+function stopInterview() {
+    isInterviewActive = false;
+    recognition.stop();
+    window.speechSynthesis.cancel();
 
-  alert(
-    `Interview Complete\n\n` +
-    `Hireability Score: ${hireability}\n\n` +
-    `Content: ${Math.round(history.reduce((s,h)=>s+h.content,0)/history.length)}\n` +
-    `Confidence: ${Math.round(history.reduce((s,h)=>s+h.confidence,0)/history.length)}\n` +
-    `Fluency: ${Math.round(history.reduce((s,h)=>s+h.fluency,0)/history.length)}\n` +
-    `Visual: ${Math.round(history.reduce((s,h)=>s+h.visual,0)/history.length)}`
-  );
+    const hireability = computeHireability();
+    finalHeatmap();
+    alert(`
+INTERVIEW REPORT
+
+Hireability: ${hireability}
+
+Content: ${safeAvg(history, 'content')}
+Confidence: ${safeAvg(history, 'confidence')}
+Fluency: ${safeAvg(history, 'fluency')}
+Visual: ${safeAvg(history, 'visual')}
+`);
+
+}
+
+function heatmap(text){
+  let t = text;
+
+  fillerWords.forEach(w=>{
+    const r = new RegExp("\\b"+w+"\\b","gi");
+    t = t.replace(r, `<span style="color:#ef4444">${w}</span>`);
+  });
+
+  powerWords.forEach(w=>{
+    const r = new RegExp("\\b"+w+"\\b","gi");
+    t = t.replace(r, `<span style="color:#22c55e">${w}</span>`);
+  });
+
+  return t;
+}
+
+function finalHeatmap() {
+    document.body.innerHTML = `
+    <h1 style="color:white">Interview Heatmap</h1>
+    <div style="padding:20px;font-size:18px">${transcriptBox.innerHTML}</div>
+  `;
 }
 
 function saveConfig() {
