@@ -32,6 +32,13 @@ let totalFrames = 0;
 let goodFrames = 0;
 let isInterviewActive = false;
 let silenceTimer = null; // To detect when you finish speaking
+let contentScore = 0;
+let fluencyScore = 0;
+let confidenceScore = 100;
+let lastNervous = 0;
+let frozenNervous = 0;
+
+
 
 function extractGeminiText(data) {
     try {
@@ -61,12 +68,24 @@ async function callGemini(userAnswer) {
     }
 
     const dynamicPrompt = `
-    You are a technical interviewer for a '${targetRole}' role.
-    Context: ${userContext}.
-    Candidate said: "${userAnswer}"
-    
-    Reply in 2 sentences max. Ask a follow up question.
-    `;
+                You are an expert technical interviewer and evaluator.
+
+                Evaluate the candidate answer strictly and return ONLY valid JSON in this format:
+
+                {
+                "rating":"Weak/Average/Strong/Exceptional",
+                "grammarErrors": number,
+                "fillerCount": number,
+                "star": { "situation":true/false,"task":true/false,"action":true/false,"result":true/false },
+                "improvementTip":"short tip",
+                "followup":"next interview question"
+                }
+
+                Role: ${targetRole}
+                Resume: ${userContext}
+                Answer: "${userAnswer}"
+                `;
+
 
     const requestBody = {
         contents: [{
@@ -92,9 +111,38 @@ async function callGemini(userAnswer) {
         }
 
         // IF SUCCESS
-        const aiResponse = extractGeminiText(data);
-        transcriptBox.innerHTML += `<br><b style="color:#3b82f6">AI:</b> ${aiResponse}<br>`;
-        speakText(aiResponse);
+        const raw = extractGeminiText(data);
+
+        // Extract JSON even if Gemini talks before/after it
+        const match = raw.match(/\{[\s\S]*\}/);
+
+        if (!match) {
+            transcriptBox.innerHTML += "<br><b style='color:red'>AI Parse Error. Please repeat.</b>";
+            return;
+        }
+
+        let evalData;
+        try {
+            evalData = JSON.parse(match[0]);
+        } catch {
+            transcriptBox.innerHTML += "<br><b style='color:red'>AI Parse Error. Please repeat.</b>";
+            return;
+        }
+
+        transcriptBox.innerHTML += `
+<br><b style="color:#22c55e">Rating:</b> ${evalData.rating}
+<br><b>Tip:</b> ${evalData.improvementTip}
+<br><b style="color:#3b82f6">AI:</b> ${evalData.followup}<br>`;
+        if (frozenNervous > 70) {
+            evalData.followup = "Let's go slowly. " + evalData.followup;
+        }
+
+        speakText(evalData.followup);
+        contentScore = { Weak: 30, Average: 55, Strong: 80, Exceptional: 95 }[evalData.rating];
+        fluencyScore = Math.max(0, 100 - (evalData.grammarErrors * 6) - (evalData.fillerCount * 4));
+        contentScore = Math.min(100, Math.max(0, contentScore));
+        fluencyScore = Math.min(100, Math.max(0, fluencyScore));
+
 
     } catch (error) {
         console.error("NETWORK ERROR:", error);
@@ -127,7 +175,13 @@ recognition.onresult = (event) => {
         // 2. Start Timer: If silence for 2.5 seconds, send to AI
         silenceTimer = setTimeout(() => {
             if (isInterviewActive) {
+                frozenNervous = lastNervous;   // capture nervousness at answer time
                 callGemini(finalTranscript);
+                if (frozenNervous > 60) {
+                    setTimeout(() => {
+                        speakText("Take a breath. You're doing okay. Try to slow down slightly.");
+                    }, 1200);
+                }
             }
         }, 2500);
     }
@@ -178,6 +232,9 @@ function onResults(results) {
         let avgBaseline = baselineDeviation / Math.max(1, baselineFrames);
         let stressDeviation = Math.max(0, deviation - avgBaseline);
         nervousScore = Math.min(100, stressDeviation * 2);
+        lastNervous = nervousScore;
+        confidenceScore = Math.max(0, 100 - nervousScore);
+
 
         if (isInterviewActive) {
             nervousData.push(nervousScore);
@@ -202,6 +259,10 @@ function onResults(results) {
             scoreText.innerText = percent + "%";
             statusText.style.color = isGood ? "#10b981" : "#ef4444";
         }
+    }
+    if(isInterviewActive && nervousScore < 30){
+        document.querySelector('.video-container').style.boxShadow = '0 0 18px #22c55e';
+
     }
     canvasCtx.restore();
 }
@@ -239,17 +300,20 @@ nervousChart = new Chart(ctx, {
 });
 
 
+function startInterview(){
+  baselineActive = true;
+  baselineFrames = 0;
+  baselineDeviation = 0;
+  isInterviewActive = true;
 
-function startInterview() {
-    baselineActive = true;
-    baselineFrames = 0;
-    baselineDeviation = 0;
-    speakText("Calibration started. Please look naturally at the screen for 8 seconds.");
-    setTimeout(() => baselineActive = false, 8000);
+  speakText("Calibration started. Please look naturally at the screen.");
 
-    isInterviewActive = true;
-    speakText("Hello. I am Gemini. Let's start the interview. Tell me about yourself.");
+  setTimeout(()=>{
+    baselineActive = false;
+    speakText("Calibration complete. Tell me about yourself.");
+  }, 8000);
 }
+
 
 function stopInterview() {
     isInterviewActive = false;
