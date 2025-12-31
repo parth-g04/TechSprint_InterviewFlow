@@ -18,6 +18,14 @@ const transcriptBox = document.getElementById('transcript-box');
 
 // State Variables
 // Configuration State
+let nervousData = [];
+let nervousLabels = [];
+let nervousScore = 0;
+let nervousChart;
+let baselineFrames = 0;
+let baselineDeviation = 0;
+let baselineActive = true;
+let geminiLocked = false;
 let targetRole = "Software Engineer";
 let userContext = "";
 let totalFrames = 0;
@@ -25,15 +33,28 @@ let goodFrames = 0;
 let isInterviewActive = false;
 let silenceTimer = null; // To detect when you finish speaking
 
+function extractGeminiText(data) {
+    try {
+        const parts = data.candidates?.[0]?.content?.parts || [];
+        for (const p of parts) {
+            if (p.text) return p.text;
+        }
+        return "Could you please repeat that?";
+    } catch (e) {
+        return "Could you please repeat that?";
+    }
+}
 
 async function callGemini(userAnswer) {
+    if (geminiLocked) return;
+    geminiLocked = true;
+    setTimeout(() => geminiLocked = false, 15000);
     if (!userAnswer) return;
 
     transcriptBox.innerHTML += `<br><b>🤖 AI Thinking...</b>`;
-    console.log("Sending to Gemini:", userAnswer); 
+    console.log("Sending to Gemini:", userAnswer);
 
-    // Using Gemini 2.0 Flash Experimental (Fastest + Free Quota)
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${GEMINI_API_KEY}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
     if (!GEMINI_API_KEY || GEMINI_API_KEY.includes("PASTE")) {
         alert("CRITICAL ERROR: API Key is missing in config.js!");
         return;
@@ -71,7 +92,7 @@ async function callGemini(userAnswer) {
         }
 
         // IF SUCCESS
-        const aiResponse = data.candidates[0].content.parts[0].text;
+        const aiResponse = extractGeminiText(data);
         transcriptBox.innerHTML += `<br><b style="color:#3b82f6">AI:</b> ${aiResponse}<br>`;
         speakText(aiResponse);
 
@@ -102,23 +123,23 @@ recognition.onresult = (event) => {
 
     if (finalTranscript !== "") {
         transcriptBox.innerHTML += `<br><b>You:</b> ${finalTranscript}`;
-        
+
         // 2. Start Timer: If silence for 2.5 seconds, send to AI
         silenceTimer = setTimeout(() => {
             if (isInterviewActive) {
                 callGemini(finalTranscript);
             }
-        }, 2500); 
+        }, 2500);
     }
 };
 
 
 function speakText(text) {
     // Pause recognition so AI doesn't hear itself
-    recognition.stop(); 
+    recognition.stop();
 
     const speech = new SpeechSynthesisUtterance(text);
-    speech.onend = function() {
+    speech.onend = function () {
         // Start listening again after AI finishes talking
         if (isInterviewActive) recognition.start();
     }
@@ -133,7 +154,7 @@ function onResults(results) {
 
     if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
         const landmarks = results.multiFaceLandmarks[0];
-        drawConnectors(canvasCtx, landmarks, FACEMESH_TESSELATION, {color: '#C0C0C070', lineWidth: 1});
+        drawConnectors(canvasCtx, landmarks, FACEMESH_TESSELATION, { color: '#C0C0C070', lineWidth: 1 });
 
         const nose = landmarks[1];
         let status = "Stable";
@@ -145,10 +166,38 @@ function onResults(results) {
         if (nose.y > 0.7) { status = "Looking Down"; isGood = false; }
 
         statusText.innerText = status;
-        
-        if(isInterviewActive) {
+        let deviation = Math.abs(nose.x - 0.5) * 100;
+
+
+        if (baselineActive) {
+            baselineFrames++;
+            baselineDeviation += deviation;
+            return;
+        }
+
+        let avgBaseline = baselineDeviation / Math.max(1, baselineFrames);
+        let stressDeviation = Math.max(0, deviation - avgBaseline);
+        nervousScore = Math.min(100, stressDeviation * 2);
+
+        if (isInterviewActive) {
+            nervousData.push(nervousScore);
+            nervousLabels.push('');
+            if (nervousData.length > 20) {
+                nervousData.shift();
+                nervousLabels.shift();
+            }
+            nervousChart.update();
+        }
+        if (nervousScore > 60) {
+            document.querySelector('.video-container').style.borderColor = '#f59e0b'; // amber
+        } else {
+            document.querySelector('.video-container').style.borderColor = '#3b82f6';
+        }
+
+
+        if (isInterviewActive) {
             totalFrames++;
-            if(isGood) goodFrames++;
+            if (isGood) goodFrames++;
             let percent = Math.round((goodFrames / totalFrames) * 100);
             scoreText.innerText = percent + "%";
             statusText.style.color = isGood ? "#10b981" : "#ef4444";
@@ -157,18 +206,47 @@ function onResults(results) {
     canvasCtx.restore();
 }
 
-const faceMesh = new FaceMesh({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`});
-faceMesh.setOptions({maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5});
+const faceMesh = new FaceMesh({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}` });
+faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
 faceMesh.onResults(onResults);
 
+let lastSend = 0;
+
 const camera = new Camera(videoElement, {
-    onFrame: async () => { await faceMesh.send({image: videoElement}); },
+    onFrame: async () => {
+        if (Date.now() - lastSend < 100) return;   // 10 FPS cap
+        lastSend = Date.now();
+        await faceMesh.send({ image: videoElement });
+    },
     width: 640, height: 480
 });
 camera.start();
 
+const ctx = document.getElementById('nervousChart').getContext('2d');
+
+nervousChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+        labels: nervousLabels,
+        datasets: [{
+            label: 'Nervousness',
+            data: nervousData,
+            borderWidth: 2,
+            tension: 0.4
+        }]
+    },
+    options: { scales: { y: { min: 0, max: 100 } } }
+});
+
+
 
 function startInterview() {
+    baselineActive = true;
+    baselineFrames = 0;
+    baselineDeviation = 0;
+    speakText("Calibration started. Please look naturally at the screen for 8 seconds.");
+    setTimeout(() => baselineActive = false, 8000);
+
     isInterviewActive = true;
     speakText("Hello. I am Gemini. Let's start the interview. Tell me about yourself.");
 }
@@ -182,9 +260,9 @@ function stopInterview() {
 function saveConfig() {
     const role = document.getElementById('role-input').value;
     const resume = document.getElementById('resume-input').value;
-    
-    if(role) targetRole = role;
-    if(resume) userContext = resume;
+
+    if (role) targetRole = role;
+    if (resume) userContext = resume;
 
     // Hide the modal
     document.getElementById('setup-modal').style.display = 'none';
