@@ -1,84 +1,274 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>InterviewFlow AI</title>
+    <title>InterviewFlow AI - Pre-Placement Evaluation Studio</title>
     <link rel="stylesheet" href="style.css">
-    
+
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
 </head>
 <body>
-    <div id="setup-modal" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 23, 42, 0.95); z-index: 1000; display: flex; justify-content: center; align-items: center;">
-        <div class="card" style="width: 400px; text-align: center; border: 2px solid #3b82f6;">
-            <h2 style="color: white; font-size: 24px;">🎯 Configure Interview</h2>
-            
-            <div style="margin: 20px 0; text-align: left;">
-                <label style="color: #94a3b8; display: block; margin-bottom: 8px;">Target Role</label>
-                <input type="text" id="role-input" placeholder="e.g. Java Developer, HR Manager" value="Software Engineer" 
-                       style="width: 100%; padding: 10px; border-radius: 8px; border: none; background: #1e293b; color: white;">
+    <div id="setup-modal" class="modal-overlay">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h2>Configure Your Interview</h2>
+                <p class="modal-subtitle">Customize your AI evaluation session</p>
             </div>
 
-            <div style="margin: 20px 0; text-align: left;">
-                <label style="color: #94a3b8; display: block; margin-bottom: 8px;">Paste Resume Summary (Optional)</label>
-                <textarea id="resume-input" rows="4" placeholder="I am a 3rd sem CS student good at DSA..." 
-                          style="width: 100%; padding: 10px; border-radius: 8px; border: none; background: #1e293b; color: white; font-family: sans-serif;"></textarea>
+            <div class="form-group">
+                <label>Target Role</label>
+                <input type="text" id="role-input" placeholder="e.g. Software Engineer, Data Analyst" value="Software Engineer">
             </div>
 
-            <button id="save-btn" style="background: #2563eb; margin-top: 10px;">🚀 Launch Interview</button>
+            <div class="form-group">
+                <label>Resume Summary <span class="optional">(Optional)</span></label>
+                <textarea id="resume-input" rows="4" placeholder="Paste your resume highlights: skills, projects, experience..."></textarea>
+            </div>
+
+            <button id="save-btn" class="btn-primary">Launch Interview Session</button>
         </div>
     </div>
 
-    <h1 class="header-title">🚀 InterviewFlow <span class="badge">AI Powered</span></h1>
-
-    <div class="dashboard">
-        <div class="video-container">
-            <video class="input_video" autoplay playsinline></video>
-            <canvas class="output_canvas" width="640" height="480"></canvas>
+    <div class="top-bar">
+        <div class="brand">
+            <div class="logo">IF</div>
+            <div>
+                <h1>InterviewFlow</h1>
+                <p class="tagline">AI Pre-Placement Evaluation Studio</p>
+            </div>
         </div>
+        <div class="controls-header">
+            <button id="theme-toggle" class="btn-icon" title="Toggle theme">
+                <span class="theme-icon">☀️</span>
+            </button>
+        </div>
+    </div>
 
-        <div class="sidebar">
-            <div class="card status-card">
-                <h2>📡 Status Monitor</h2>
-                <div class="metric">
-                    <span>Eye Contact Score:</span>
-                    <span id="eye-contact-score" class="score-value">100%</span>
+    <div class="studio-layout">
+        <div class="column column-left">
+            <div class="glass-card">
+                <div class="card-header">
+                    <h3>Live Camera Feed</h3>
+                    <span class="status-badge" id="camera-status">Active</span>
                 </div>
-                <div class="card">
-                    <h2>🧠 Nervousness EKG</h2>
-                    <canvas id="nervousChart" height="120"></canvas>
+                <div class="video-wrapper">
+                    <video class="input_video" autoplay playsinline></video>
+                    <canvas class="output_canvas" width="640" height="480"></canvas>
+                    <div class="video-overlay">
+                        <div class="overlay-metric">
+                            <span class="metric-label">Eye Contact</span>
+                            <span class="metric-value" id="eye-contact-score">100%</span>
+                        </div>
+                    </div>
                 </div>
-
-                <div class="metric">
-                    <span>Head Position:</span>
-                    <span id="head-shake" class="status-value">Waiting...</span>
+                <div class="posture-indicator">
+                    <div class="indicator-item">
+                        <span class="indicator-label">Head Position</span>
+                        <span class="indicator-status" id="head-shake">Calibrating...</span>
+                    </div>
                 </div>
             </div>
 
-            <div class="card transcript-card">
-                <h2>🎤 Live Transcript</h2>
-                <div id="transcript-box" style="height: 100px; overflow-y: auto; color: #ccc; font-style: italic; font-size: 14px;">
-                    (Waiting for you to speak...)
+            <div class="glass-card">
+                <div class="card-header">
+                    <h3>Nervousness Monitor</h3>
+                </div>
+                <div class="chart-wrapper">
+                    <canvas id="nervousChart" height="140"></canvas>
                 </div>
             </div>
 
-            <div class="card control-card">
-                <h2>🎮 Controls</h2>
+            <div class="glass-card control-panel">
                 <button id="start-btn" class="btn-start">Start Interview</button>
-                <button id="stop-btn" class="btn-stop">Stop</button>
+                <button id="stop-btn" class="btn-stop">End Session & View Report</button>
             </div>
-            
-            <div class="card logs-card">
-                <h2>📝 Logs</h2>
-                <div id="logs">System initialized...</div>
+        </div>
+
+        <div class="column column-center">
+            <div class="glass-card transcript-panel">
+                <div class="card-header">
+                    <h3>Live Transcript</h3>
+                    <span class="live-indicator">LIVE</span>
+                </div>
+                <div class="transcript-content" id="transcript-box">
+                    <div class="transcript-placeholder">
+                        <p>Waiting for interview to start...</p>
+                        <p class="transcript-hint">Your speech will appear here in real-time with AI feedback</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="column column-right">
+            <div class="glass-card hireability-card">
+                <div class="card-header">
+                    <h3>Hireability Index</h3>
+                </div>
+                <div class="hireability-score">
+                    <div class="score-ring">
+                        <svg viewBox="0 0 200 200">
+                            <circle cx="100" cy="100" r="80" class="score-bg"></circle>
+                            <circle cx="100" cy="100" r="80" class="score-progress" id="hireability-ring"></circle>
+                        </svg>
+                        <div class="score-text">
+                            <span class="score-number" id="hireability-number">0</span>
+                            <span class="score-label">Score</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="verdict-badge" id="verdict-badge">
+                    <span class="verdict-text">Analyzing...</span>
+                </div>
+            </div>
+
+            <div class="glass-card metrics-grid">
+                <div class="metric-item">
+                    <div class="metric-icon">💼</div>
+                    <div class="metric-details">
+                        <span class="metric-name">Content Quality</span>
+                        <div class="metric-bar">
+                            <div class="metric-fill" id="content-bar"></div>
+                        </div>
+                        <span class="metric-score" id="content-score">0</span>
+                    </div>
+                </div>
+
+                <div class="metric-item">
+                    <div class="metric-icon">🎯</div>
+                    <div class="metric-details">
+                        <span class="metric-name">Confidence</span>
+                        <div class="metric-bar">
+                            <div class="metric-fill" id="confidence-bar"></div>
+                        </div>
+                        <span class="metric-score" id="confidence-score">0</span>
+                    </div>
+                </div>
+
+                <div class="metric-item">
+                    <div class="metric-icon">💬</div>
+                    <div class="metric-details">
+                        <span class="metric-name">Fluency</span>
+                        <div class="metric-bar">
+                            <div class="metric-fill" id="fluency-bar"></div>
+                        </div>
+                        <span class="metric-score" id="fluency-score">0</span>
+                    </div>
+                </div>
+
+                <div class="metric-item">
+                    <div class="metric-icon">👁️</div>
+                    <div class="metric-details">
+                        <span class="metric-name">Visual Presence</span>
+                        <div class="metric-bar">
+                            <div class="metric-fill" id="visual-bar"></div>
+                        </div>
+                        <span class="metric-score" id="visual-score">0</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="glass-card insights-card">
+                <div class="card-header">
+                    <h3>Real-time Insights</h3>
+                </div>
+                <div class="insights-list" id="insights-list">
+                    <div class="insight-item">
+                        <span class="insight-icon">💡</span>
+                        <span class="insight-text">System ready for evaluation</span>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
 
-    <script src="config.js"></script> 
+    <div id="report-page" class="report-page hidden">
+        <div class="report-container">
+            <div class="report-header">
+                <button id="back-to-dashboard" class="btn-secondary">← Back to Dashboard</button>
+                <h1>Interview Evaluation Report</h1>
+                <p class="report-date" id="report-date"></p>
+            </div>
+
+            <div class="report-grid">
+                <div class="glass-card report-main">
+                    <div class="placement-verdict" id="placement-verdict">
+                        <div class="verdict-icon">🎯</div>
+                        <h2 class="verdict-title">Placement Status</h2>
+                        <div class="verdict-result" id="verdict-result">Analyzing...</div>
+                    </div>
+
+                    <div class="final-hireability">
+                        <h3>Final Hireability Score</h3>
+                        <div class="final-score-ring">
+                            <svg viewBox="0 0 200 200">
+                                <circle cx="100" cy="100" r="80" class="score-bg"></circle>
+                                <circle cx="100" cy="100" r="80" class="score-progress" id="final-ring"></circle>
+                            </svg>
+                            <div class="score-text">
+                                <span class="score-number" id="final-score-number">0</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button id="download-report" class="btn-download">Download PDF Report</button>
+                </div>
+
+                <div class="glass-card report-metrics">
+                    <h3>Performance Breakdown</h3>
+                    <div class="breakdown-list">
+                        <div class="breakdown-item">
+                            <span class="breakdown-label">Content Quality</span>
+                            <div class="breakdown-bar">
+                                <div class="breakdown-fill" id="report-content-bar"></div>
+                            </div>
+                            <span class="breakdown-score" id="report-content">0</span>
+                        </div>
+                        <div class="breakdown-item">
+                            <span class="breakdown-label">Confidence</span>
+                            <div class="breakdown-bar">
+                                <div class="breakdown-fill" id="report-confidence-bar"></div>
+                            </div>
+                            <span class="breakdown-score" id="report-confidence">0</span>
+                        </div>
+                        <div class="breakdown-item">
+                            <span class="breakdown-label">Fluency</span>
+                            <div class="breakdown-bar">
+                                <div class="breakdown-fill" id="report-fluency-bar"></div>
+                            </div>
+                            <span class="breakdown-score" id="report-fluency">0</span>
+                        </div>
+                        <div class="breakdown-item">
+                            <span class="breakdown-label">Visual Presence</span>
+                            <div class="breakdown-bar">
+                                <div class="breakdown-fill" id="report-visual-bar"></div>
+                            </div>
+                            <span class="breakdown-score" id="report-visual">0</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="glass-card report-transcript">
+                    <h3>Interview Transcript Heatmap</h3>
+                    <div class="heatmap-legend">
+                        <span><span class="legend-box filler"></span> Filler Words</span>
+                        <span><span class="legend-box power"></span> Power Words</span>
+                    </div>
+                    <div class="transcript-heatmap" id="report-transcript-content"></div>
+                </div>
+
+                <div class="glass-card report-tips">
+                    <h3>Improvement Tips</h3>
+                    <div id="improvement-tips"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="config.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

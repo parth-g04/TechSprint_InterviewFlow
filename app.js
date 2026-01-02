@@ -1,16 +1,13 @@
 
-// --- CONFIGURATION ---
-// Ensure CONFIG is defined or replace this with your actual key string for testing
 const GEMINI_API_KEY = (typeof CONFIG !== 'undefined') ? CONFIG.API_KEY : "YOUR_API_KEY_HERE";
 
 const SYSTEM_PROMPT = `
-You are a strict but helpful technical interviewer for a Google software engineer role. 
-Keep your responses short (max 2 sentences). 
+You are a strict but helpful technical interviewer for a Google software engineer role.
+Keep your responses short (max 2 sentences).
 Based on the candidate's answer, ask a relevant follow-up technical question.
 If the answer is bad, politely correct them and move on.
 `;
 
-// --- DOM ELEMENTS ---
 const videoElement = document.getElementsByClassName('input_video')[0];
 const canvasElement = document.getElementsByClassName('output_canvas')[0];
 const canvasCtx = canvasElement.getContext('2d');
@@ -18,7 +15,6 @@ const statusText = document.getElementById('head-shake');
 const scoreText = document.getElementById('eye-contact-score');
 const transcriptBox = document.getElementById('transcript-box');
 
-// --- STATE VARIABLES ---
 let nervousData = [];
 let nervousLabels = [];
 let nervousScore = 0;
@@ -32,7 +28,7 @@ let userContext = "";
 let totalFrames = 0;
 let goodFrames = 0;
 let isInterviewActive = false;
-let silenceTimer = null; 
+let silenceTimer = null;
 let contentScore = 0;
 let fluencyScore = 0;
 let confidenceScore = 100;
@@ -46,8 +42,6 @@ let verificationFlags = [];
 
 const fillerWords = ["um","uh","uhh","umm","hmm","like","basically","actually","i","maybe","probably"];
 const powerWords  = ["built","led","designed","implemented","optimized","debugged","solved","architected"];
-
-// --- HELPER FUNCTIONS ---
 
 function extractGeminiText(data) {
     try {
@@ -95,7 +89,71 @@ function computeHireability(){
   );
 }
 
-// --- SPEECH RECOGNITION ---
+function updateMetricsUI() {
+    if (history.length === 0) return;
+
+    const hireability = computeHireability();
+    const content = safeAvg(history, 'content');
+    const confidence = safeAvg(history, 'confidence');
+    const fluency = safeAvg(history, 'fluency');
+    const visual = safeAvg(history, 'visual');
+
+    const hireabilityNum = document.getElementById('hireability-number');
+    const hireabilityRing = document.getElementById('hireability-ring');
+
+    if (hireabilityNum) hireabilityNum.textContent = hireability;
+    if (hireabilityRing) {
+        const circumference = 2 * Math.PI * 80;
+        const offset = circumference - (hireability / 100) * circumference;
+        hireabilityRing.style.strokeDashoffset = offset;
+
+        if (hireability >= 75) hireabilityRing.style.stroke = '#10b981';
+        else if (hireability >= 50) hireabilityRing.style.stroke = '#f59e0b';
+        else hireabilityRing.style.stroke = '#ef4444';
+    }
+
+    updateMetricBar('content-bar', 'content-score', content);
+    updateMetricBar('confidence-bar', 'confidence-score', confidence);
+    updateMetricBar('fluency-bar', 'fluency-score', fluency);
+    updateMetricBar('visual-bar', 'visual-score', visual);
+
+    const verdictBadge = document.getElementById('verdict-badge');
+    if (verdictBadge) {
+        const verdictText = verdictBadge.querySelector('.verdict-text');
+        if (verdictText) {
+            if (hireability >= 75) verdictText.textContent = 'Strong Candidate';
+            else if (hireability >= 50) verdictText.textContent = 'Moderate Candidate';
+            else verdictText.textContent = 'Needs Improvement';
+        }
+    }
+}
+
+function updateMetricBar(barId, scoreId, value) {
+    const bar = document.getElementById(barId);
+    const score = document.getElementById(scoreId);
+
+    if (bar) bar.style.width = value + '%';
+    if (score) score.textContent = value;
+}
+
+function addInsight(text, icon = '💡') {
+    const insightsList = document.getElementById('insights-list');
+    if (!insightsList) return;
+
+    const insight = document.createElement('div');
+    insight.className = 'insight-item';
+    insight.innerHTML = `
+        <span class="insight-icon">${icon}</span>
+        <span class="insight-text">${text}</span>
+    `;
+
+    insightsList.insertBefore(insight, insightsList.firstChild);
+
+    if (insightsList.children.length > 5) {
+        insightsList.removeChild(insightsList.lastChild);
+    }
+}
+
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 const recognition = new SpeechRecognition();
 
@@ -114,18 +172,22 @@ recognition.onresult = (event) => {
     }
 
     if (finalTranscript !== "") {
+        const placeholder = transcriptBox.querySelector('.transcript-placeholder');
+        if (placeholder) placeholder.remove();
+
         transcriptBox.innerHTML += `<br><b>You:</b> ${heatmap(finalTranscript)}`;
-        transcriptBox.scrollTop = transcriptBox.scrollHeight; // Auto-scroll
+        transcriptBox.scrollTop = transcriptBox.scrollHeight;
 
         silenceTimer = setTimeout(() => {
             if (isInterviewActive) {
                 frozenNervous = lastNervous;
                 frozenEye = Math.round((goodFrames / Math.max(1, totalFrames)) * 100);
-                callGemini(finalTranscript); 
+                callGemini(finalTranscript);
 
                 if (frozenNervous > 60) {
                     setTimeout(() => {
                         speakText("Take a breath. You're doing okay. Try to slow down slightly.");
+                        addInsight("High nervousness detected. Remember to breathe.", '🧘');
                     }, 1200);
                 }
             }
@@ -133,20 +195,17 @@ recognition.onresult = (event) => {
     }
 };
 
-// --- GEMINI API ---
 async function callGemini(userAnswer) {
     if (geminiLocked) return;
     geminiLocked = true;
     setTimeout(() => geminiLocked = false, 15000);
     if (!userAnswer) return;
 
-    transcriptBox.innerHTML += `<br><b>🤖 AI Thinking...</b>`;
-    
-    // Sanitize input slightly to prevent JSON breakages
-    const safeAnswer = userAnswer.replace(/"/g, "'");
+    transcriptBox.innerHTML += `<br><b style="color:#3b82f6">AI Thinking...</b>`;
 
+    const safeAnswer = userAnswer.replace(/"/g, "'");
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
-    
+
     const dynamicPrompt = `
         You are an expert technical interviewer.
         Evaluate the answer strictly. Return ONLY valid JSON.
@@ -177,24 +236,21 @@ async function callGemini(userAnswer) {
         if (!response.ok) throw new Error(data.error?.message || "API Error");
 
         const raw = extractGeminiText(data);
-        const match = raw.match(/\{[\s\S]*\}/); // Find JSON block
+        const match = raw.match(/\{[\s\S]*\}/);
 
         if (!match) throw new Error("AI Parse Error - No JSON found");
 
         const evalData = JSON.parse(match[0]);
 
-        // UI Update
         transcriptBox.innerHTML += `
             <br><b style="color:#22c55e">Rating:</b> ${evalData.rating}
             <br><b>Tip:</b> ${evalData.improvementTip}
             <br><b style="color:#3b82f6">AI:</b> ${evalData.followup}<br>`;
         transcriptBox.scrollTop = transcriptBox.scrollHeight;
 
-        // Speak
         if (frozenNervous > 70) evalData.followup = "Let's go slowly. " + evalData.followup;
         speakText(evalData.followup);
 
-        // Scoring
         let currentContent = { Weak: 30, Average: 55, Strong: 80, Exceptional: 95 }[evalData.rating] || 50;
         let currentFluency = Math.max(0, 100 - (evalData.grammarErrors * 6) - (evalData.fillerCount * 4));
         let visualConf = Math.max(0, 100 - frozenNervous);
@@ -209,20 +265,26 @@ async function callGemini(userAnswer) {
             visual: frozenEye
         });
 
+        updateMetricsUI();
+
+        if (evalData.rating === "Exceptional" || evalData.rating === "Strong") {
+            addInsight("Excellent answer! Keep up the good work.", '⭐');
+        } else if (evalData.verification === "Gap") {
+            addInsight("Resume inconsistency detected: " + evalData.verificationNote, '⚠️');
+        }
+
     } catch (error) {
         console.error("API ERROR:", error);
         transcriptBox.innerHTML += `<br><b style="color:red">Error:</b> ${error.message}`;
-        geminiLocked = false; // Unlock if error
+        geminiLocked = false;
     }
 }
 
-// --- TEXT TO SPEECH ---
 function speakText(text){
-  recognition.abort(); // Stop listening while speaking
+  recognition.abort();
 
   const speech = new SpeechSynthesisUtterance(text);
   speech.onend = () => {
-    // Only restart listening if interview is still active
     if(isInterviewActive) {
         try {
             recognition.start();
@@ -235,7 +297,6 @@ function speakText(text){
   window.speechSynthesis.speak(speech);
 }
 
-// --- FACEMESH & CAMERA ---
 function onResults(results) {
     canvasCtx.save();
     canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
@@ -243,14 +304,12 @@ function onResults(results) {
 
     if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
         const landmarks = results.multiFaceLandmarks[0];
-        // Draw Mesh
         if(typeof drawConnectors !== 'undefined' && typeof FACEMESH_TESSELATION !== 'undefined') {
              drawConnectors(canvasCtx, landmarks, FACEMESH_TESSELATION, { color: '#C0C0C070', lineWidth: 1 });
         }
 
         const nose = landmarks[1];
 
-        // Calc Deviation
         let deviation = Math.abs(nose.x - 0.5) * 100;
         if (baselineActive) {
             baselineFrames++;
@@ -259,13 +318,11 @@ function onResults(results) {
             return;
         }
 
-        // Calc Stress
         let avgBaseline = baselineDeviation / Math.max(1, baselineFrames);
-        let stressDeviation = Math.max(0, deviation - avgBaseline); 
-        nervousScore = Math.min(100, stressDeviation * 2.5); 
+        let stressDeviation = Math.max(0, deviation - avgBaseline);
+        nervousScore = Math.min(100, stressDeviation * 2.5);
         lastNervous = nervousScore;
-        
-        // Update Graph
+
         if (isInterviewActive) {
             nervousData.push(nervousScore);
             nervousLabels.push('');
@@ -277,23 +334,19 @@ function onResults(results) {
             nervousChart.update();
         }
 
-        // Eye Contact & Direction
         if (isInterviewActive) {
             totalFrames++;
             let isGood = (nose.x > 0.4 && nose.x < 0.6 && nose.y > 0.35 && nose.y < 0.75);
             if (isGood) goodFrames++;
-            
+
             let percent = Math.round((goodFrames / Math.max(1, totalFrames)) * 100);
             if(scoreText) scoreText.innerText = percent + "%";
 
             if(statusText) {
-                if (nervousScore > 50) document.querySelector('.video-container').style.borderColor = '#ef4444'; 
-                else document.querySelector('.video-container').style.borderColor = '#3b82f6';
-
-                if (nose.x < 0.4) { statusText.innerText = "Looking Right"; statusText.style.color = "#ef4444"; } 
-                else if (nose.x > 0.6) { statusText.innerText = "Looking Left"; statusText.style.color = "#ef4444"; } 
-                else if (nose.y < 0.35) { statusText.innerText = "Looking Up"; statusText.style.color = "#ef4444"; } 
-                else if (nose.y > 0.75) { statusText.innerText = "Looking Down"; statusText.style.color = "#ef4444"; } 
+                if (nose.x < 0.4) { statusText.innerText = "Looking Right"; statusText.style.color = "#ef4444"; }
+                else if (nose.x > 0.6) { statusText.innerText = "Looking Left"; statusText.style.color = "#ef4444"; }
+                else if (nose.y < 0.35) { statusText.innerText = "Looking Up"; statusText.style.color = "#ef4444"; }
+                else if (nose.y > 0.75) { statusText.innerText = "Looking Down"; statusText.style.color = "#ef4444"; }
                 else { statusText.innerText = "Stable"; statusText.style.color = "#22c55e"; }
             }
         }
@@ -301,7 +354,6 @@ function onResults(results) {
     canvasCtx.restore();
 }
 
-// Initialize FaceMesh
 const faceMesh = new FaceMesh({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}` });
 faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
 faceMesh.onResults(onResults);
@@ -313,10 +365,10 @@ const camera = new Camera(videoElement, {
   onFrame: async () => {
     if (isProcessing) return;
     if (Date.now() - lastSend < 100) return;
-    isProcessing = true; 
+    isProcessing = true;
     lastSend = Date.now();
-    try { await faceMesh.send({ image: videoElement }); } 
-    catch (error) { console.error(error); } 
+    try { await faceMesh.send({ image: videoElement }); }
+    catch (error) { console.error(error); }
     finally { isProcessing = false; }
   },
   width: 640,
@@ -324,7 +376,6 @@ const camera = new Camera(videoElement, {
 });
 camera.start();
 
-// Initialize Chart
 const ctx = document.getElementById('nervousChart').getContext('2d');
 nervousChart = new Chart(ctx, {
     type: 'line',
@@ -336,35 +387,46 @@ nervousChart = new Chart(ctx, {
             borderColor: '#ef4444',
             borderWidth: 2,
             pointRadius: 0,
-            tension: 0.2
+            tension: 0.2,
+            fill: false
         }]
     },
-    options: { 
+    options: {
         animation: false,
         responsive: true,
-        scales: { y: { min: 0, max: 100, display: true }, x: { display: false } } 
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+            y: { min: 0, max: 100, display: true, grid: { color: 'rgba(148, 163, 184, 0.1)' } },
+            x: { display: false }
+        }
     }
 });
-
-
 
 function startInterview(){
   baselineActive = true;
   baselineFrames = 0;
   baselineDeviation = 0;
   isInterviewActive = true;
-  history = []; // Reset history
+  history = [];
   totalFrames = 0;
   goodFrames = 0;
+  nervousData = [];
+  nervousLabels = [];
 
-  // Let camera stabilize
+  transcriptBox.innerHTML = '<div class="transcript-placeholder"><p>Calibrating camera...</p></div>';
+  addInsight("Interview session started", '🎬');
+
   setTimeout(()=>{
     speakText("Calibration started. Please look naturally at the screen.");
+    addInsight("Camera calibration in progress", '📹');
   }, 400);
 
   setTimeout(()=>{
     baselineActive = false;
     speakText(`Calibration complete. I see you are applying for a ${targetRole} position. Tell me about yourself.`);
+    transcriptBox.innerHTML = '';
+    addInsight("Ready for interview. AI is listening.", '🎤');
   }, 8500);
 }
 
@@ -372,28 +434,116 @@ function stopInterview() {
     isInterviewActive = false;
     recognition.stop();
     window.speechSynthesis.cancel();
+
     const hireability = computeHireability();
-    finalHeatmap();
-    // Use a slight delay to allow UI to update before alert
-    setTimeout(() => {
-        alert(`REPORT:\nHireability: ${hireability}%\nContent: ${safeAvg(history, 'content')}\nConfidence: ${safeAvg(history, 'confidence')}`);
-    }, 500);
+    const content = safeAvg(history, 'content');
+    const confidence = safeAvg(history, 'confidence');
+    const fluency = safeAvg(history, 'fluency');
+    const visual = safeAvg(history, 'visual');
+
+    showReport(hireability, content, confidence, fluency, visual);
 }
 
-function finalHeatmap() {
-    document.body.innerHTML = `
-    <div style="padding:20px; font-family:sans-serif; background:#111; color:white; min-height:100vh;">
-        <h1>Interview Heatmap</h1>
-        <div style="background:#222; padding:20px; border-radius:10px;">${transcriptBox.innerHTML}</div>
-        <button onclick="location.reload()" style="margin-top:20px; padding:10px 20px;">Restart</button>
-    </div>
-  `;
+function showReport(hireability, content, confidence, fluency, visual) {
+    const reportPage = document.getElementById('report-page');
+    const studioLayout = document.querySelector('.studio-layout');
+
+    if (reportPage) reportPage.classList.remove('hidden');
+    if (studioLayout) studioLayout.style.display = 'none';
+
+    const reportDate = document.getElementById('report-date');
+    if (reportDate) reportDate.textContent = new Date().toLocaleDateString('en-US', {
+        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+    });
+
+    const finalScoreNum = document.getElementById('final-score-number');
+    const finalRing = document.getElementById('final-ring');
+
+    if (finalScoreNum) {
+        let currentScore = 0;
+        const interval = setInterval(() => {
+            currentScore += 1;
+            finalScoreNum.textContent = currentScore;
+            if (currentScore >= hireability) {
+                clearInterval(interval);
+                finalScoreNum.textContent = hireability;
+            }
+        }, 20);
+    }
+
+    if (finalRing) {
+        const circumference = 2 * Math.PI * 80;
+        const offset = circumference - (hireability / 100) * circumference;
+        setTimeout(() => {
+            finalRing.style.strokeDashoffset = offset;
+            if (hireability >= 75) finalRing.style.stroke = '#10b981';
+            else if (hireability >= 50) finalRing.style.stroke = '#f59e0b';
+            else finalRing.style.stroke = '#ef4444';
+        }, 500);
+    }
+
+    const verdictResult = document.getElementById('verdict-result');
+    if (verdictResult) {
+        if (hireability >= 75) {
+            verdictResult.textContent = 'Placement Ready';
+            verdictResult.style.background = 'rgba(16, 185, 129, 0.1)';
+            verdictResult.style.color = '#10b981';
+        } else if (hireability >= 50) {
+            verdictResult.textContent = 'Moderate Performance';
+            verdictResult.style.background = 'rgba(245, 158, 11, 0.1)';
+            verdictResult.style.color = '#f59e0b';
+        } else {
+            verdictResult.textContent = 'Needs Improvement';
+            verdictResult.style.background = 'rgba(239, 68, 68, 0.1)';
+            verdictResult.style.color = '#ef4444';
+        }
+    }
+
+    setTimeout(() => {
+        updateReportBar('report-content-bar', 'report-content', content);
+        updateReportBar('report-confidence-bar', 'report-confidence', confidence);
+        updateReportBar('report-fluency-bar', 'report-fluency', fluency);
+        updateReportBar('report-visual-bar', 'report-visual', visual);
+    }, 800);
+
+    const transcriptHeatmap = document.getElementById('report-transcript-content');
+    if (transcriptHeatmap) {
+        transcriptHeatmap.innerHTML = transcriptBox.innerHTML || '<p style="color: var(--text-muted)">No transcript available</p>';
+    }
+
+    const improvementTips = document.getElementById('improvement-tips');
+    if (improvementTips) {
+        const tips = [];
+        if (content < 70) tips.push({ icon: '💼', text: 'Focus on providing more specific examples from your experience' });
+        if (fluency < 70) tips.push({ icon: '💬', text: 'Practice reducing filler words and improving sentence structure' });
+        if (confidence < 70) tips.push({ icon: '🎯', text: 'Work on maintaining composure and speaking with conviction' });
+        if (visual < 70) tips.push({ icon: '👁️', text: 'Maintain better eye contact and stable head position' });
+
+        if (tips.length === 0) {
+            tips.push({ icon: '⭐', text: 'Excellent performance! Keep practicing to maintain this level' });
+        }
+
+        improvementTips.innerHTML = tips.map(tip => `
+            <div class="insight-item">
+                <span class="insight-icon">${tip.icon}</span>
+                <span class="insight-text">${tip.text}</span>
+            </div>
+        `).join('');
+    }
+}
+
+function updateReportBar(barId, scoreId, value) {
+    const bar = document.getElementById(barId);
+    const score = document.getElementById(scoreId);
+
+    if (bar) bar.style.width = value + '%';
+    if (score) score.textContent = value;
 }
 
 function saveConfig() {
     const roleInput = document.getElementById('role-input');
     const resumeInput = document.getElementById('resume-input');
-    
+
     if (roleInput && roleInput.value) targetRole = roleInput.value;
     if (resumeInput && resumeInput.value) userContext = resumeInput.value;
 
@@ -403,23 +553,52 @@ function saveConfig() {
     speakText(`Setup complete. Getting ready for a ${targetRole} interview.`);
 }
 
-
 document.addEventListener('DOMContentLoaded', () => {
-
-    const startBtn = document.getElementById('start-btn'); // Ensure your HTML button has id="start-btn"
+    const startBtn = document.getElementById('start-btn');
     if(startBtn) {
         startBtn.addEventListener('click', startInterview);
-    } else {
-        console.error("Button with ID 'start-btn' not found in HTML");
     }
 
-    const stopBtn = document.getElementById('stop-btn'); // Ensure your HTML button has id="stop-btn"
+    const stopBtn = document.getElementById('stop-btn');
     if(stopBtn) {
         stopBtn.addEventListener('click', stopInterview);
     }
 
-    const saveBtn = document.getElementById('save-btn'); // Ensure your HTML button has id="save-btn"
+    const saveBtn = document.getElementById('save-btn');
     if(saveBtn) {
         saveBtn.addEventListener('click', saveConfig);
+    }
+
+    const themeToggle = document.getElementById('theme-toggle');
+    if (themeToggle) {
+        themeToggle.addEventListener('click', () => {
+            const html = document.documentElement;
+            const currentTheme = html.getAttribute('data-theme');
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            html.setAttribute('data-theme', newTheme);
+
+            const icon = themeToggle.querySelector('.theme-icon');
+            if (icon) icon.textContent = newTheme === 'dark' ? '☀️' : '🌙';
+        });
+    }
+
+    const backBtn = document.getElementById('back-to-dashboard');
+    if (backBtn) {
+        backBtn.addEventListener('click', () => {
+            const reportPage = document.getElementById('report-page');
+            const studioLayout = document.querySelector('.studio-layout');
+
+            if (reportPage) reportPage.classList.add('hidden');
+            if (studioLayout) studioLayout.style.display = 'grid';
+
+            location.reload();
+        });
+    }
+
+    const downloadBtn = document.getElementById('download-report');
+    if (downloadBtn) {
+        downloadBtn.addEventListener('click', () => {
+            alert('PDF download functionality will be available in production version. For now, use Print to PDF (Ctrl+P)');
+        });
     }
 });
