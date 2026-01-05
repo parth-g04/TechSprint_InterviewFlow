@@ -1,7 +1,7 @@
 
 // --- CONFIGURATION ---
-// Ensure CONFIG is defined or replace this with your actual key string for testing
-const GEMINI_API_KEY = (typeof CONFIG !== 'undefined') ? CONFIG.API_KEY : "YOUR_API_KEY_HERE";
+// Load API key from environment (window.GEMINI_API_KEY injected by server/build or from .env)
+const GEMINI_API_KEY = window.GEMINI_API_KEY || (typeof CONFIG !== 'undefined' ? CONFIG.API_KEY : "YOUR_API_KEY_HERE");
 
 const SYSTEM_PROMPT = `
 You are a strict but helpful technical interviewer for a Google software engineer role. 
