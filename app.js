@@ -1,7 +1,8 @@
 
 // --- CONFIGURATION ---
-// Load API key from environment (window.GEMINI_API_KEY injected by server/build or from .env)
-const GEMINI_API_KEY = window.GEMINI_API_KEY || (typeof CONFIG !== 'undefined' ? CONFIG.API_KEY : "YOUR_API_KEY_HERE");
+// On Vercel: Set GEMINI_API_KEY in environment variables
+// Locally: Uses .env file via build process or direct variable
+const GEMINI_API_KEY = typeof process !== 'undefined' && process.env?.GEMINI_API_KEY ? process.env.GEMINI_API_KEY : "AIzaSyB5e5Bz-KZzPIiJSqz9qt1qZkv6WuF4_Eg";
 
 const SYSTEM_PROMPT = `
 You are a strict but helpful technical interviewer for a Google software engineer role. 
